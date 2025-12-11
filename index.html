@@ -85,15 +85,21 @@
 </head>
 <body>
 
+    <!-- Camera Video Element -->
     <video id="camera-feed" autoplay playsinline muted></video>
 
+    <!-- The AR Interface -->
     <div id="hud">
-        <div id="reticle"></div> <div id="target"></div>  </div>
+        <div id="reticle"></div> <!-- Fixed Center -->
+        <div id="target"></div>  <!-- Moving Object -->
+    </div>
 
+    <!-- Haptic Trigger Hack -->
     <label class="haptic-hack">
         <input type="checkbox" switch id="haptic-switch">
     </label>
 
+    <!-- Start Screen -->
     <div id="overlay">
         <h2>AR Haptic Prototype</h2>
         <p style="padding: 0 20px;">Move your phone to keep the Red Target in the center.<br><br>Vibration increases as you lose the target.</p>
@@ -126,21 +132,23 @@
         // --- 1. INITIALIZATION ---
         startBtn.addEventListener('click', async () => {
             try {
-                // A. Request Camera
+                // BUG FIX: Request Orientation FIRST (Must happen immediately on click)
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response !== 'granted') {
+                        alert('Motion permission is required for the target to move.');
+                        return;
+                    }
+                }
+
+                // THEN Request Camera (Can happen slightly later)
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
                 
-                // B. Request Device Orientation (iOS 13+ requirement)
-                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    const response = await DeviceOrientationEvent.requestPermission();
-                    if (response !== 'granted') return alert('Permission denied');
-                }
-
                 // C. Start Listeners
                 window.addEventListener('deviceorientation', handleOrientation);
                 
                 // D. Set Initial Target Position (Straight ahead relative to start)
-                // We'll set a slight offset so the user has to find it
                 targetPosition.yaw = 0; // We'll calibrate this in the first frame
                 
                 // E. Hide Overlay

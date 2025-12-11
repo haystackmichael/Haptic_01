@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AR Haptic Target</title>
+    <title>AR Haptic Game</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         
-        /* 1. The Camera Background */
+        /* 1. Camera Background */
         #camera-feed {
             position: absolute;
             top: 0; left: 0;
@@ -16,111 +16,122 @@
             z-index: 1;
         }
 
-        /* 2. The HUD Layer */
+        /* 2. HUD Layer */
         #hud {
             position: absolute;
             top: 0; left: 0;
             width: 100vw; height: 100vh;
             z-index: 10;
-            pointer-events: none; /* Let touches pass through */
+            pointer-events: none;
             display: flex;
             justify-content: center;
             align-items: center;
         }
 
-        /* The Center Reticle (Crosshair) */
+        /* The Player's Fixed Reticle */
         #reticle {
-            width: 40px; height: 40px;
-            border: 2px solid rgba(255, 255, 255, 0.5);
+            width: 50px; height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.8);
             border-radius: 50%;
             position: absolute;
-            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            /* Add a crosshair */
+            display: flex; justify-content: center; align-items: center;
+        }
+        #reticle::after {
+            content: '+'; color: white; font-size: 20px; font-weight: bold;
         }
 
         /* The Moving Target */
         #target {
-            width: 80px; height: 80px;
+            width: 100px; height: 100px; /* Made larger */
             background: radial-gradient(circle, #ff4444 0%, #cc0000 100%);
+            border: 4px solid white;
             border-radius: 50%;
             position: absolute;
-            /* We will move this via JS */
-            transform: translate(-50%, -50%);
-            display: none; /* Hidden until started */
-            box-shadow: 0 0 20px #ff0000;
+            transform: translate(-50%, -50%); /* Centers the div on its coordinate */
+            display: none; 
+            box-shadow: 0 0 30px #ff0000;
+            transition: background 0.2s;
         }
 
-        /* 3. The Haptic "Hack" Switch (Hidden) */
-        .haptic-hack {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
-        }
+        /* Haptic Hack Switch */
+        .haptic-hack { position: absolute; opacity: 0; pointer-events: none; }
 
-        /* Start Button overlay */
+        /* UI Overlay */
         #overlay {
-            position: absolute;
-            top: 0; left: 0;
+            position: absolute; top: 0; left: 0;
             width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.85);
             z-index: 20;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            color: white;
-            text-align: center;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            color: white; text-align: center;
         }
         button {
-            padding: 15px 30px;
-            font-size: 18px;
-            background: #007AFF;
-            color: white;
-            border: none;
-            border-radius: 25px;
-            margin-top: 20px;
-            cursor: pointer;
+            padding: 16px 32px; font-size: 20px;
+            background: #007AFF; color: white;
+            border: none; border-radius: 30px;
+            margin-top: 30px; cursor: pointer;
+            font-weight: bold;
         }
-        #status { margin-top: 10px; font-size: 12px; color: #aaa; }
+        
+        /* Debug Info */
+        #debug-info {
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            text-align: center; color: rgba(255,255,255,0.7);
+            font-size: 14px; z-index: 15;
+            pointer-events: none;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
 
-    <!-- Camera Video Element -->
     <video id="camera-feed" autoplay playsinline muted></video>
 
-    <!-- The AR Interface -->
     <div id="hud">
-        <div id="reticle"></div> <!-- Fixed Center -->
-        <div id="target"></div>  <!-- Moving Object -->
+        <div id="reticle"></div> 
+        <div id="target"></div>
     </div>
 
-    <!-- Haptic Trigger Hack -->
-    <label class="haptic-hack">
-        <input type="checkbox" switch id="haptic-switch">
-    </label>
+    <!-- Haptic Trigger -->
+    <label class="haptic-hack"><input type="checkbox" switch id="haptic-switch"></label>
+
+    <!-- Debug Text -->
+    <div id="debug-info">Waiting to start...</div>
 
     <!-- Start Screen -->
     <div id="overlay">
-        <h2>AR Haptic Prototype</h2>
-        <p style="padding: 0 20px;">Move your phone to keep the Red Target in the center.<br><br>Vibration increases as you lose the target.</p>
-        <button id="start-btn">Start Experience</button>
-        <div id="status">Requires Camera & Motion Permissions</div>
+        <h1>AR Pursuit</h1>
+        <p style="padding: 0 30px; line-height: 1.5;">
+            1. Keep the Reticle on the Red Target.<br>
+            2. The Target will move.<br>
+            3. Phone vibrates if you lose it.
+        </p>
+        <button id="start-btn">Start Game</button>
     </div>
 
     <script>
-        // --- CONFIGURATION ---
-        const TARGET_DISTANCE_THRESHOLD = 300; // Pixel distance to start vibrating
-        const MAX_VIBRATION_INTERVAL = 500;    // Slowest vibration (ms)
-        const MIN_VIBRATION_INTERVAL = 50;     // Fastest vibration (ms)
+        // --- GAME CONFIG ---
+        const SENSITIVITY = 15;        // Pixels per degree of rotation
+        const TARGET_SPEED = 0.3;      // How fast the target wanders
+        const MAX_VIBRATION_INTERVAL = 400; 
+        const MIN_VIBRATION_INTERVAL = 30;  
 
         // --- STATE ---
         let isRunning = false;
-        let phoneOrientation = { alpha: 0, beta: 90, gamma: 0 }; // Current phone rotation
-        let targetPosition = { yaw: 0, pitch: 0 }; // Where the target "lives" in the world
+        let calibrated = false;
         
-        // Haptic State
+        // Sensor Data (Phone)
+        let phoneOrientation = { alpha: 0, beta: 90, gamma: 0 };
+        
+        // World Data (Target)
+        let targetWorldPos = { yaw: 0, pitch: 90 }; 
+        
+        // Haptics
         let lastHapticTime = 0;
-        let currentHapticInterval = 0; // 0 means OFF
+        let currentHapticInterval = 0; 
         const hapticSwitch = document.getElementById('haptic-switch');
 
         // Elements
@@ -128,139 +139,145 @@
         const overlay = document.getElementById('overlay');
         const startBtn = document.getElementById('start-btn');
         const video = document.getElementById('camera-feed');
+        const debugEl = document.getElementById('debug-info');
 
-        // --- 1. INITIALIZATION ---
+        // --- 1. STARTUP ---
         startBtn.addEventListener('click', async () => {
             try {
-                // BUG FIX: Request Orientation FIRST (Must happen immediately on click)
+                // Request Motion Permission FIRST
                 if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                     const response = await DeviceOrientationEvent.requestPermission();
                     if (response !== 'granted') {
-                        alert('Motion permission is required for the target to move.');
+                        alert('Motion permission denied. Game cannot play.');
                         return;
                     }
                 }
 
-                // THEN Request Camera (Can happen slightly later)
+                // Request Camera
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
-                
-                // C. Start Listeners
+
+                // Listeners
                 window.addEventListener('deviceorientation', handleOrientation);
-                
-                // D. Set Initial Target Position (Straight ahead relative to start)
-                targetPosition.yaw = 0; // We'll calibrate this in the first frame
-                
-                // E. Hide Overlay
+
+                // UI Reset
                 overlay.style.display = 'none';
                 targetEl.style.display = 'block';
                 isRunning = true;
                 
-                // F. Start Game Loop
+                // Start Loop
                 requestAnimationFrame(gameLoop);
 
             } catch (err) {
-                alert("Error starting app: " + err.message);
+                alert("Start Error: " + err.message);
             }
         });
 
-        // --- 2. SENSOR LOGIC ---
+        // --- 2. SENSOR HANDLER ---
         function handleOrientation(event) {
-            // alpha: rotation around z-axis (0-360)
-            // beta: front-back tilt (-180 to 180)
-            // gamma: left-right tilt (-90 to 90)
+            // alpha: 0-360 (Compass)
+            // beta: -180 to 180 (Front/Back Tilt). 90 is upright.
+            // gamma: -90 to 90 (Left/Right Tilt)
+            
+            // Normalize values to avoid nulls
             phoneOrientation.alpha = event.alpha || 0;
-            phoneOrientation.beta = event.beta || 90; // Default upright
+            phoneOrientation.beta = event.beta || 90;
             phoneOrientation.gamma = event.gamma || 0;
 
-            // Simple initialization on first frame to place target in front of user
-            if (!window.calibrated) {
-                targetPosition.yaw = phoneOrientation.alpha;
-                targetPosition.pitch = phoneOrientation.beta;
-                window.calibrated = true;
+            // Calibration: On first frame, place target exactly where user is looking
+            if (!calibrated && isRunning) {
+                targetWorldPos.yaw = phoneOrientation.alpha;
+                targetWorldPos.pitch = phoneOrientation.beta;
+                calibrated = true;
             }
         }
 
-        // --- 3. GAME LOOP (60fps) ---
+        // --- 3. GAME LOOP ---
         function gameLoop(timestamp) {
             if (!isRunning) return;
 
-            // -- A. Calculate Position on Screen --
-            // This is "Fake AR" math. We calculate the difference between 
-            // where the phone is pointing and where the target is.
+            // A. UPDATE TARGET (Wander Logic)
+            // We use Sine waves based on time to create smooth wandering
+            const time = timestamp / 1000; // Seconds
             
-            let yawDiff = (targetPosition.yaw - phoneOrientation.alpha);
-            let pitchDiff = (targetPosition.pitch - phoneOrientation.beta);
+            // Target moves in a figure-8-ish pattern around its origin
+            // We update the "World Position" of the target relative to calibration
+            if (calibrated) {
+                // Add drift to the initial position
+                // Yaw (Left/Right) +/- 20 degrees
+                targetWorldPos.yaw += Math.sin(time) * TARGET_SPEED;
+                
+                // Pitch (Up/Down) +/- 10 degrees
+                targetWorldPos.pitch += Math.cos(time * 0.8) * TARGET_SPEED;
+            }
 
-            // Handle 360 wrap-around for compass
+            // B. CALCULATE SCREEN POSITION
+            // Calculate difference between Phone Look Direction and Target Position
+            let yawDiff = targetWorldPos.yaw - phoneOrientation.alpha;
+            let pitchDiff = targetWorldPos.pitch - phoneOrientation.beta;
+
+            // Handle Compass Wrap (359 -> 1 degree is only 2 degrees difference, not -358)
             if (yawDiff > 180) yawDiff -= 360;
             if (yawDiff < -180) yawDiff += 360;
 
-            // Map degrees to pixels (Approximate field of view)
-            // 1 degree approx 15 pixels on mobile
-            const sensitivity = 15; 
             const centerX = window.innerWidth / 2;
             const centerY = window.innerHeight / 2;
 
-            const x = centerX + (yawDiff * sensitivity);
-            const y = centerY + (pitchDiff * sensitivity);
+            // Map Degree Diff to Pixel Offset
+            const x = centerX + (yawDiff * SENSITIVITY);
+            
+            // NOTE: Invert Y. If Target is "Higher" (Pitch > Phone), it should be UP on screen (Negative Y)
+            const y = centerY - (pitchDiff * SENSITIVITY); 
 
-            // Update DOM
+            // Apply to DOM
             targetEl.style.transform = `translate(${x}px, ${y}px)`;
 
 
-            // -- B. Calculate Distance from Center --
-            // Distance formula: sqrt(x^2 + y^2) relative to center
-            const dx = x - centerX;
-            const dy = y - centerY;
-            const distance = Math.sqrt(dx*dx + dy*dy);
+            // C. GAMEPLAY & HAPTICS
+            // Calculate distance from center of screen
+            const dist = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+            
+            // Debug Info
+            debugEl.innerText = `Dist: ${Math.round(dist)}px | Yaw: ${Math.round(phoneOrientation.alpha)} | Pitch: ${Math.round(phoneOrientation.beta)}`;
 
+            // Zone Logic
+            const safeZone = 80; // Pixels
+            const dangerZone = 500; // Pixels
 
-            // -- C. Haptic Logic (Hot/Cold) --
-            // Logic: "As object gets further... increasingly vibrate"
-            // If distance is SMALL (Target Centered) -> NO VIBRATE
-            // If distance is LARGE (Target Lost) -> FAST VIBRATE
-
-            if (distance < 50) {
-                // Target is in center (Success zone)
-                targetEl.style.background = "#00ff00"; // Turn Green
-                currentHapticInterval = 0; // Stop vibrating
+            if (dist < safeZone) {
+                // Safe: Green, No Vibrate
+                targetEl.style.background = "#00ff00";
+                targetEl.style.borderColor = "white";
+                currentHapticInterval = 0;
             } else {
-                // Target is away
+                // Danger: Red, Vibrate
                 targetEl.style.background = "radial-gradient(circle, #ff4444 0%, #cc0000 100%)";
+                targetEl.style.borderColor = "red";
+
+                // Calculate Vibrate Speed
+                // Closer to danger limit = Faster
+                const clampedDist = Math.min(Math.max(dist, safeZone), dangerZone);
+                const progress = (clampedDist - safeZone) / (dangerZone - safeZone); // 0.0 to 1.0
                 
-                // Map distance to interval
-                // Distance 50px -> Interval 500ms (Slow)
-                // Distance 400px -> Interval 50ms (Fast)
-                const maxDist = 400;
-                const clampedDist = Math.min(Math.max(distance, 50), maxDist);
-                const progress = (clampedDist - 50) / (maxDist - 50); // 0.0 to 1.0
-                
-                // Invert: Farther = Faster (Lower Interval)
+                // 0% progress (close) -> Slow Interval
+                // 100% progress (far) -> Fast Interval
                 currentHapticInterval = MAX_VIBRATION_INTERVAL - (progress * (MAX_VIBRATION_INTERVAL - MIN_VIBRATION_INTERVAL));
             }
 
-            // -- D. Trigger Haptic --
+            // D. TRIGGER HAPTIC
             if (currentHapticInterval > 0) {
                 if (timestamp - lastHapticTime > currentHapticInterval) {
-                    triggerHaptic();
+                    // Try Android
+                    if (navigator.vibrate) navigator.vibrate(10);
+                    // Try iOS Switch Hack
+                    hapticSwitch.checked = !hapticSwitch.checked;
+                    
                     lastHapticTime = timestamp;
                 }
             }
 
             requestAnimationFrame(gameLoop);
         }
-
-        // --- 4. HAPTIC TRIGGER ---
-        function triggerHaptic() {
-            // Android Support
-            if (navigator.vibrate) navigator.vibrate(10);
-
-            // iOS Hack: Toggle the switch
-            // Note: iOS Safari may throttle this if it happens too fast
-            hapticSwitch.checked = !hapticSwitch.checked;
-        }
-
     </script>
 </body>
 </html>
